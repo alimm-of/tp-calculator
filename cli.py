@@ -28,6 +28,11 @@ def main():
     pc.add_argument("--операция", default="ОднородныйТовар")
     pc.add_argument("--экспресс", action="store_true")
     pc.add_argument("--по-новому", action="store_true")
+    pc.add_argument("--тип-перевозки", default=None, help="вид тарифа на перевозку (для ветки по-новому)")
+    pc.add_argument("--мест", type=int, default=0)
+    pc.add_argument("--в-упаковке", type=int, default=0)
+    pc.add_argument("--брэнд", action="store_true")
+    pc.add_argument("--z-товар", action="store_true")
 
     a = ap.parse_args()
     if a.cmd == "import":
@@ -39,6 +44,8 @@ def main():
         общий_вес=a.вес, общий_объем=a.объём, вид_товара=a.вид_товара,
         группа_вида_товара=a.группа, тип_упаковки=a.упаковка, склад=a.склад,
         клиент=a.клиент, вид_операции=a.операция, экспресс_доставка=a.экспресс, дата=date.today(),
+        вид_тарифа_на_перевозку=a.тип_перевозки, количество_мест=a.мест, количество_в_упаковке=a.в_упаковке,
+        брэнд=a.брэнд, z_товар=a.z_товар,
     )
     res = engine.рассчитать(inp, repo, расчет_по_новому=a.по_новому)
     print(json.dumps(res.__dict__, ensure_ascii=False, indent=2))

@@ -162,6 +162,53 @@ class PriceRepository:
             return None
         return ДопРасходСтрока(цена=row["цена"], по_весу=bool(row["по_весу"]))
 
+    # --- Ветка «по новому»: растаможка, тарифы на перевозку, наценки ---
+    def _город_склада(self, склад: Optional[str]) -> Optional[str]:
+        if not склад:
+            return None
+        row = self.conn.execute("SELECT город_отправки FROM sklady WHERE ид = ?", (склад,)).fetchone()
+        return row["город_отправки"] if row else None
+
+    def цена_растаможки(self, inp) -> Optional[dict]:
+        """тп_ЦеныНаРастаможку.СрезПоследних(дата, ВидТовара = ?)."""
+        row = self.conn.execute(
+            "SELECT * FROM ceny_rastamozhka WHERE вид_товара = ? ORDER BY период DESC LIMIT 1",
+            (inp.вид_товара,)
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "цена": row["цена"],
+            "по_весу": bool(row["по_весу"]),
+            "по_количеству": bool(row["по_количеству"]),
+            "логистика_включена": bool(row["логистика_включена"]),
+        }
+
+    def тариф_перевозки(self, inp, средний_вес: float) -> Optional[dict]:
+        """тп_ТарифыНаПеревозку: ВидТарифа + ГородОтправки(склада) + СреднийВес МЕЖДУ ВесОт И ВесДо."""
+        город = self._город_склада(inp.склад)
+        row = self.conn.execute(
+            """SELECT * FROM tarify_perevozka
+               WHERE вид_тарифа IS ? AND город_отправки IS ?
+                 AND ? BETWEEN вес_от AND вес_до
+               ORDER BY период DESC LIMIT 1""",
+            (inp.вид_тарифа_на_перевозку, город, средний_вес)
+        ).fetchone()
+        if not row:
+            return None
+        return {"цена": row["цена"], "по_весу": bool(row["по_весу"])}
+
+    def наценки_на_товар(self, d: date) -> dict:
+        """тп_НаценкиНаТовар → {вид_наценки: наценка} (срез последних по каждому виду)."""
+        rows = self.conn.execute(
+            "SELECT вид_наценки, наценка FROM nacenki_tovar ORDER BY период DESC"
+        ).fetchall()
+        out: dict = {}
+        for r in rows:
+            if r["вид_наценки"] not in out:   # первая = самый свежий период
+                out[r["вид_наценки"]] = r["наценка"]
+        return out
+
 
 def _row_to_price(r: sqlite3.Row, источник: str, приоритет: int) -> PriceRow:
     g = lambda k, dflt=0: (r[k] if k in r.keys() and r[k] is not None else dflt)
