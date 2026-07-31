@@ -90,7 +90,7 @@ def _списки():
     return (склады, упаковки or УПАКОВКИ_DEFAULT, ВИДЫ_ТОВАРА, list(ТИПЫ_ПЕРЕВОЗКИ.keys()))
 
 
-PAGE = """
+PAGE = r"""
 <!doctype html><html lang=ru><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width, initial-scale=1">
 <title>Калькуляция · Транспортные перевозки</title>
@@ -122,16 +122,20 @@ PAGE = """
   <div><label>Тип перевозки</label>
     <select name=тип_перевозки>{% for t in типы %}<option {{'selected' if f.тип_перевозки==t else ''}}>{{t}}</option>{% endfor %}</select></div>
   <div><label>Вид товара</label>
-    <input name=вид_товара list=виды_товара_list autocomplete=off value="{{f.вид_товара or ''}}" placeholder="введите название или код">
+    <input id=вид_товара_поиск list=виды_товара_list autocomplete=off
+           value="{{f.вид_товара_имя or ''}}" placeholder="введите название или код"
+           oninput="подобратьВид(this.value)">
+    <input type=hidden name=вид_товара id=вид_товара_код value="{{f.вид_товара or ''}}">
+    <input type=hidden name=вид_товара_имя id=вид_товара_имя value="{{f.вид_товара_имя or ''}}">
     <datalist id=виды_товара_list>
-      {% for v in виды_товара %}<option value="{{v.код}}">{{v.имя}}{% if v.группа %} · {{v.группа}}{% endif %}</option>{% endfor %}
+      {% for v in виды_товара %}<option data-код="{{v.код}}" value="{{v.имя}}{% if v.группа %} · {{v.группа}}{% endif %} [{{v.код}}]"></option>{% endfor %}
     </datalist></div>
   <div><label>Тип упаковки</label>
     <select name=упаковка>{% for u in упаковки %}<option {{'selected' if f.упаковка==u else ''}}>{{u}}</option>{% endfor %}</select></div>
   <div><label>Вес, кг</label><input name=вес type=number step=any value="{{f.вес or 1000}}"></div>
   <div><label>Объём, м³</label><input name=объём type=number step=any value="{{f.объём or 2}}"></div>
   <div><label>Кол-во мест</label><input name=мест type=number value="{{f.мест or 1}}"></div>
-  <div><label>В упаковке</label><input name=в_упаковке type=number value="{{f.в_упаковке or 0}}"></div>
+  <div id=box_вупак style="display:none"><label>В упаковке (шт)</label><input name=в_упаковке type=number value="{{f.в_упаковке or 0}}"></div>
  </div>
  <div class=chk><input type=checkbox id=pn name=по_новому value=1 {{'checked' if f.по_новому else ''}}>
    <label for=pn style="margin:0">Расчёт «по новому» (перевозка + растаможка + наценки)</label></div>
@@ -158,8 +162,21 @@ PAGE = """
  {% for n in res.примечания %}<div class=note>⚠ {{n}}</div>{% endfor %}
 </div>{% endif %}
 <div class=src>Логика перенесена из общего модуля тп_РасчетЦен. Свои тарифы / last-mile — в <code>tp_calc/extensions.py</code>.</div>
-</div></body></html>
-"""
+<script>
+function подобратьВид(v){
+  // формат опции: "Название · Группа [КОД]" — вытащим КОД из хвоста
+  var m = v.match(/\[([^\]]+)\]\s*$/);
+  document.getElementById('вид_товара_код').value = m ? m[1] : v.trim();
+  document.getElementById('вид_товара_имя').value = v;
+}
+(function(){
+  var pn = document.getElementById('pn');
+  var box = document.getElementById('box_вупак');
+  function upd(){ if(box) box.style.display = pn.checked ? '' : 'none'; }
+  if(pn && box){ pn.addEventListener('change', upd); upd(); }
+})();
+</script>
+</div></body></html>"""
 
 
 @app.route("/", methods=["GET", "POST"])
