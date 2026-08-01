@@ -41,6 +41,18 @@ def _загрузить_виды_товара():
 ВИДЫ_ТОВАРА = _загрузить_виды_товара()
 ГРУППА_ПО_КОДУ = {v["код"]: v.get("группа", "") for v in ВИДЫ_ТОВАРА}
 
+# Справочник типов упаковки: код → название (из 1С)
+def _загрузить_упаковки():
+    path = os.path.join(HERE, "tp_calc", "upakovki.json")
+    if os.path.exists(path):
+        try:
+            return json.load(open(path, encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+УПАКОВКИ_СПРАВОЧНИК = _загрузить_упаковки()   # {"1": "Korobka", ...}
+
 app = Flask(__name__)
 
 # --- Защита паролем (HTTP Basic Auth) ---
@@ -75,20 +87,37 @@ if not os.path.exists(DB):
 
 
 def _списки():
-    """Склады (ид+наименование) и упаковки — из БД. Виды товара — из справочника 1С."""
+    """Склады (ид+наименование) и упаковки — из БД. Виды товара — из справочника 1С.
+    Склады фильтруются: для расчёта нужны только страны отправки (Китай, Киргизия/Бишкек);
+    склады приёма в Узбекистане не показываются. Если поля 'страна' в базе нет — показываем все."""
     склады, упаковки = [], []
     if os.path.exists(DB):
         c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
+        # есть ли колонка страна?
+        cols = [r[1] for r in c.execute("PRAGMA table_info(sklady)")]
         try:
-            склады = [(r["ид"], r["наименование"] or r["ид"])
-                      for r in c.execute("SELECT ид, наименование FROM sklady ORDER BY наименование")]
-        except Exception: pass
+            if "страна" in cols:
+                # только страны-отправители; Узбекистан (склады приёма) исключаем
+                строки = c.execute("""
+                    SELECT ид, наименование, страна FROM sklady
+                    WHERE страна IS NULL OR (
+                        LOWER(страна) NOT LIKE '%узбек%' AND LOWER(страна) NOT LIKE '%uzb%'
+                    )
+                    ORDER BY наименование""").fetchall()
+            else:
+                строки = c.execute("SELECT ид, наименование, NULL FROM sklady ORDER BY наименование").fetchall()
+            склады = [(r[0], r[1] or r[0]) for r in строки]
+        except Exception:
+            pass
         try:
-            упаковки = sorted({r[0] for r in c.execute(
-                "SELECT DISTINCT тип_упаковки FROM ceny_po_vidu WHERE тип_упаковки IS NOT NULL")},
-                key=lambda x: (len(x), x))
+            коды_в_ценах = {r[0] for r in c.execute(
+                "SELECT DISTINCT тип_упаковки FROM ceny_po_vidu WHERE тип_упаковки IS NOT NULL")}
+            # пары (код, название); название из справочника, иначе сам код
+            упаковки = sorted(
+                [(k, УПАКОВКИ_СПРАВОЧНИК.get(k, k)) for k in коды_в_ценах],
+                key=lambda x: x[1])
         except Exception: pass
-    return (склады, упаковки or УПАКОВКИ_DEFAULT, ВИДЫ_ТОВАРА, list(ТИПЫ_ПЕРЕВОЗКИ.keys()))
+    return (склады, упаковки, ВИДЫ_ТОВАРА, list(ТИПЫ_ПЕРЕВОЗКИ.keys()))
 
 
 PAGE = r"""
@@ -111,6 +140,10 @@ PAGE = r"""
  .out .k{color:#555} .out .v{text-align:right;font-variant-numeric:tabular-nums}
  .tot{font-weight:700;font-size:18px;border-top:1px solid #e3e5e8;padding-top:8px;margin-top:8px}
  .note{color:#a15c00;font-size:13px;margin-top:8px} .src{color:#666;font-size:12px}
+ .результаты{position:absolute;z-index:10;left:0;right:0;background:#fff;border:1px solid #ccd0d5;border-radius:8px;max-height:260px;overflow:auto;box-shadow:0 4px 12px rgba(0,0,0,.12)}
+ .результаты div{padding:7px 10px;cursor:pointer;font-size:14px;border-bottom:1px solid #f0f1f3}
+ .результаты div:hover{background:#eaf1fd}
+ .результаты .код{color:#888;font-size:12px}
  .err{color:#b00}
 </style></head><body><div class=wrap>
 <h1>Калькуляция · на основе цен «Транспортных перевозок»</h1>
@@ -122,22 +155,26 @@ PAGE = r"""
     <select name=склад>{% for ид,имя in склады %}<option value="{{ид}}" {{'selected' if f.склад==ид else ''}}>{{имя}}</option>{% endfor %}</select></div>
   <div><label>Тип перевозки</label>
     <select name=тип_перевозки>{% for t in типы %}<option {{'selected' if f.тип_перевозки==t else ''}}>{{t}}</option>{% endfor %}</select></div>
-  <div><label>Вид товара</label>
-    <input id=вид_товара_поиск list=виды_товара_list autocomplete=off
-           value="{{f.вид_товара_имя or ''}}" placeholder="введите название или код"
-           oninput="подобратьВид(this.value)">
+  <div style="position:relative"><label>Вид товара</label>
+    <input id=вид_поиск autocomplete=off value="{{f.вид_товара_имя or ''}}"
+           placeholder="название (рус/лат) или код" oninput="искатьВид()" onfocus="искатьВид()">
     <input type=hidden name=вид_товара id=вид_товара_код value="{{f.вид_товара or ''}}">
     <input type=hidden name=вид_товара_имя id=вид_товара_имя value="{{f.вид_товара_имя or ''}}">
-    <datalist id=виды_товара_list>
-      {% for v in виды_товара %}<option data-код="{{v.код}}" value="{{v.имя}}{% if v.группа %} · {{v.группа}}{% endif %} [{{v.код}}]"></option>{% endfor %}
-    </datalist></div>
+    <div id=вид_результаты class=результаты style="display:none"></div>
+  </div>
   <div><label>Тип упаковки</label>
-    <select name=упаковка>{% for u in упаковки %}<option {{'selected' if f.упаковка==u else ''}}>{{u}}</option>{% endfor %}</select></div>
+    <select name=упаковка>{% for код,имя in упаковки %}<option value="{{код}}" {{'selected' if f.упаковка==код else ''}}>{{имя}}</option>{% endfor %}</select></div>
   <div><label>Вес, кг</label><input name=вес type=number step=any value="{{f.вес or 1000}}"></div>
-  <div><label>Объём, м³</label><input name=объём type=number step=any value="{{f.объём or 2}}"></div>
-  <div><label>Кол-во мест</label><input name=мест type=number value="{{f.мест or 1}}"></div>
+  <div><label>Объём, м³</label><input id=поле_объём name=объём type=number step=any value="{{f.объём or 2}}"></div>
+  <div><label>Кол-во мест</label><input id=поле_мест name=мест type=number value="{{f.мест or 1}}" oninput="пересчётОбъёма()"></div>
   <div id=box_вупак style="display:none"><label>В упаковке (шт)</label><input name=в_упаковке type=number value="{{f.в_упаковке or 0}}"></div>
  </div>
+ <div class=grid style="margin-top:8px">
+  <div><label>Длина, см</label><input id=g_дл name=длина type=number step=any value="{{f.длина or ''}}" oninput="пересчётОбъёма()"></div>
+  <div><label>Ширина, см</label><input id=g_ш name=ширина type=number step=any value="{{f.ширина or ''}}" oninput="пересчётОбъёма()"></div>
+  <div><label>Высота, см</label><input id=g_в name=высота type=number step=any value="{{f.высота or ''}}" oninput="пересчётОбъёма()"></div>
+ </div>
+ <div class=src style="margin:4px 0 0">Задайте Длина×Ширина×Высота (см) — объём посчитается сам: Д×Ш×В×места ÷ 1 000 000.</div>
  <div class=chk><input type=checkbox id=pn name=по_новому value=1 {{'checked' if f.по_новому else ''}}>
    <label for=pn style="margin:0">Расчёт «по новому» (перевозка + растаможка + наценки)</label></div>
  <div class=chk><input type=checkbox id=br name=брэнд value=1 {{'checked' if f.брэнд else ''}}>
@@ -164,12 +201,59 @@ PAGE = r"""
 </div>{% endif %}
 <div class=src>Логика перенесена из общего модуля тп_РасчетЦен. Свои тарифы / last-mile — в <code>tp_calc/extensions.py</code>.</div>
 <script>
-function подобратьВид(v){
-  // формат опции: "Название · Группа [КОД]" — вытащим КОД из хвоста
-  var m = v.match(/\[([^\]]+)\]\s*$/);
-  document.getElementById('вид_товара_код').value = m ? m[1] : v.trim();
-  document.getElementById('вид_товара_имя').value = v;
+window.__ВИДЫ__ = {{ виды_json|safe }};
+</script>
+<script>
+function пересчётОбъёма(){
+  var д=parseFloat(document.getElementById('g_дл').value)||0;
+  var ш=parseFloat(document.getElementById('g_ш').value)||0;
+  var в=parseFloat(document.getElementById('g_в').value)||0;
+  var м=parseFloat(document.getElementById('поле_мест').value)||1;
+  if(д>0&&ш>0&&в>0){
+    var объём=(д*ш*в*м)/1000000;   // см³ → м³
+    document.getElementById('поле_объём').value=объём.toFixed(4);
+  }
 }
+var ВИДЫ = window.__ВИДЫ__ || [];
+function искатьВид(){
+  var поле=document.getElementById('вид_поиск');
+  var box=document.getElementById('вид_результаты');
+  var q=поле.value.trim().toLowerCase();
+  document.getElementById('вид_товара_имя').value=поле.value;
+  if(q.length<1){ box.style.display='none'; return; }
+  var res=[];
+  for(var i=0;i<ВИДЫ.length && res.length<50;i++){
+    var v=ВИДЫ[i];
+    var имя=(v.имя||'').toLowerCase();
+    var рус=(v.имя_рус||'').toLowerCase();
+    var код=(v.код||'').toLowerCase();
+    // поиск по латинскому, русскому названию или коду
+    if(имя.indexOf(q)>=0 || рус.indexOf(q)>=0 || код.indexOf(q)>=0) res.push(v);
+  }
+  if(!res.length){ box.innerHTML='<div class=код>ничего не найдено</div>'; box.style.display='block'; return; }
+  var h='';
+  for(var j=0;j<res.length;j++){
+    var v=res[j];
+    // показываем латинское (для расчёта) + русское для понятности
+    var подпись=(v.имя||'');
+    var доп=(v.имя_рус?(' · '+v.имя_рус):'')+(v.группа?(' · '+v.группа):'');
+    h+='<div onclick="выбратьВид(\''+v.код+'\',this)" data-имя="'+(v.имя||'').replace(/"/g,'&quot;')+'">'+
+       подпись+'<span class=код>'+доп+' ['+v.код+']</span></div>';
+  }
+  box.innerHTML=h; box.style.display='block';
+}
+function выбратьВид(код,el){
+  document.getElementById('вид_товара_код').value=код;
+  var имя=el.getAttribute('data-имя');
+  document.getElementById('вид_поиск').value=имя;
+  document.getElementById('вид_товара_имя').value=имя;
+  document.getElementById('вид_результаты').style.display='none';
+}
+document.addEventListener('click',function(e){
+  var box=document.getElementById('вид_результаты');
+  var поле=document.getElementById('вид_поиск');
+  if(box && e.target!==поле && !box.contains(e.target)) box.style.display='none';
+});
 (function(){
   var pn = document.getElementById('pn');
   var box = document.getElementById('box_вупак');
@@ -203,8 +287,14 @@ def index():
             брэнд=bool(f.get("брэнд")), z_товар=bool(f.get("z_товар")),
         )
         res = engine.рассчитать(inp, repo, расчет_по_новому=bool(f.get("по_новому")))
+    import json as _json
+    виды_json = _json.dumps(
+        [{"код": v["код"], "имя": v["имя"], "имя_рус": v.get("имя_рус", ""), "группа": v.get("группа", "")}
+         for v in виды_товара],
+        ensure_ascii=False)
     return render_template_string(PAGE, res=res, f=f, db=DB, db_ok=db_ok,
-                                  склады=склады, упаковки=упаковки, виды_товара=виды_товара, типы=типы)
+                                  склады=склады, упаковки=упаковки, виды_товара=виды_товара,
+                                  виды_json=виды_json, типы=типы)
 
 
 if __name__ == "__main__":

@@ -75,7 +75,7 @@ CREATE TABLE nastroyki_rascheta (     -- НастройкиРасчетаШК (�
 DROP TABLE IF EXISTS sklady;
 CREATE TABLE sklady (                 -- Справочник тп_Склады
     ид TEXT PRIMARY KEY, код TEXT, наименование TEXT,
-    город_отправки TEXT, только_свои_цены INTEGER DEFAULT 0
+    город_отправки TEXT, страна TEXT, только_свои_цены INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS i_ckv ON ceny_klient_vid(вид_товара, тип_упаковки, склад, клиент);
