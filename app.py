@@ -75,18 +75,19 @@ if not os.path.exists(DB):
 
 
 def _списки():
-    """Склады и упаковки — из БД (или дефолты). Виды товара — из справочника 1С."""
+    """Склады (ид+наименование) и упаковки — из БД. Виды товара — из справочника 1С."""
     склады, упаковки = [], []
     if os.path.exists(DB):
         c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
         try:
-            склады = [r["ид"] for r in c.execute("SELECT ид FROM sklady ORDER BY наименование")]
+            склады = [(r["ид"], r["наименование"] or r["ид"])
+                      for r in c.execute("SELECT ид, наименование FROM sklady ORDER BY наименование")]
         except Exception: pass
         try:
             упаковки = sorted({r[0] for r in c.execute(
-                "SELECT DISTINCT тип_упаковки FROM ceny_po_vidu WHERE тип_упаковки IS NOT NULL")})
+                "SELECT DISTINCT тип_упаковки FROM ceny_po_vidu WHERE тип_упаковки IS NOT NULL")},
+                key=lambda x: (len(x), x))
         except Exception: pass
-        c.close()
     return (склады, упаковки or УПАКОВКИ_DEFAULT, ВИДЫ_ТОВАРА, list(ТИПЫ_ПЕРЕВОЗКИ.keys()))
 
 
@@ -118,7 +119,7 @@ PAGE = r"""
 <form method=post class=card>
  <div class=grid>
   <div><label>Склад</label>
-    <select name=склад>{% for s in склады %}<option {{'selected' if f.склад==s else ''}}>{{s}}</option>{% endfor %}</select></div>
+    <select name=склад>{% for ид,имя in склады %}<option value="{{ид}}" {{'selected' if f.склад==ид else ''}}>{{имя}}</option>{% endfor %}</select></div>
   <div><label>Тип перевозки</label>
     <select name=тип_перевозки>{% for t in типы %}<option {{'selected' if f.тип_перевозки==t else ''}}>{{t}}</option>{% endfor %}</select></div>
   <div><label>Вид товара</label>
