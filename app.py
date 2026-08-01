@@ -95,15 +95,15 @@ def _списки():
         c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
         # есть ли колонка страна?
         cols = [r[1] for r in c.execute("PRAGMA table_info(sklady)")]
+        # Коды стран-отправителей (ISO): 156=Китай, 417=Киргизия. Остальное (860=Узбекистан,
+        # 643=Россия, пустые служебные группы) в калькуляторе не показываем.
+        СТРАНЫ_ОТПРАВКИ = ("156", "417")
         try:
             if "страна" in cols:
-                # только страны-отправители; Узбекистан (склады приёма) исключаем
                 строки = c.execute("""
                     SELECT ид, наименование, страна FROM sklady
-                    WHERE страна IS NULL OR (
-                        LOWER(страна) NOT LIKE '%узбек%' AND LOWER(страна) NOT LIKE '%uzb%'
-                    )
-                    ORDER BY наименование""").fetchall()
+                    WHERE страна IN (?, ?)
+                    ORDER BY наименование""", СТРАНЫ_ОТПРАВКИ).fetchall()
             else:
                 строки = c.execute("SELECT ид, наименование, NULL FROM sklady ORDER BY наименование").fetchall()
             склады = [(r[0], r[1] or r[0]) for r in строки]
