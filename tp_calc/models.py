@@ -229,6 +229,16 @@ class PriceRepository:
                 out[r["вид_наценки"]] = r["наценка"]
         return out
 
+    def расчет_по_новому_включён(self) -> bool:
+        """Константа тп_РасчетЦенПоНовому. В выгрузке её нет отдельно, поэтому определяем
+        по наличию данных растаможки: если регистр тп_ЦеныНаРастаможку заполнен —
+        значит механизм «по новому» используется в этой базе."""
+        try:
+            n = self.conn.execute("SELECT COUNT(*) FROM ceny_rastamozhka").fetchone()[0]
+            return n > 0
+        except Exception:
+            return False
+
 
 def _row_to_price(r: sqlite3.Row, источник: str, приоритет: int) -> PriceRow:
     g = lambda k, dflt=0: (r[k] if k in r.keys() and r[k] is not None else dflt)
