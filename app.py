@@ -169,12 +169,14 @@ PAGE = r"""
   <div><label>Кол-во мест</label><input id=поле_мест name=мест type=number value="{{f.мест or 1}}" oninput="пересчётОбъёма()"></div>
   <div id=box_вупак style="display:none"><label>В упаковке (шт)</label><input name=в_упаковке type=number value="{{f.в_упаковке or 0}}"></div>
  </div>
+ <div class=chk style="margin-top:8px"><input type=checkbox id=по_объёму name=по_объёму value=1 {{'checked' if f.по_объёму is not defined or f.по_объёму else ''}} onchange="переключитьОбъём()">
+   <label for=по_объёму style="margin:0">По объёму (вводить объём вручную; иначе — из габаритов)</label></div>
  <div class=grid style="margin-top:8px">
   <div><label>Длина, см</label><input id=g_дл name=длина type=number step=any value="{{f.длина or ''}}" oninput="пересчётОбъёма()"></div>
   <div><label>Ширина, см</label><input id=g_ш name=ширина type=number step=any value="{{f.ширина or ''}}" oninput="пересчётОбъёма()"></div>
   <div><label>Высота, см</label><input id=g_в name=высота type=number step=any value="{{f.высота or ''}}" oninput="пересчётОбъёма()"></div>
  </div>
- <div class=src style="margin:4px 0 0">Задайте Длина×Ширина×Высота (см) — объём посчитается сам: Д×Ш×В×места ÷ 1 000 000.</div>
+ <div class=src style="margin:4px 0 0">При снятой галке «По объёму» объём считается из Д×Ш×В×места ÷ 1 000 000.</div>
  <div class=chk><input type=checkbox id=pn name=по_новому value=1 {{'checked' if f.по_новому else ''}}>
    <label for=pn style="margin:0">Расчёт «по новому» (перевозка + растаможка + наценки)</label></div>
  <div class=chk><input type=checkbox id=br name=брэнд value=1 {{'checked' if f.брэнд else ''}}>
@@ -205,6 +207,9 @@ window.__ВИДЫ__ = {{ виды_json|safe }};
 </script>
 <script>
 function пересчётОбъёма(){
+  // если галка "По объёму" стоит — объём вводится вручную, габариты не считаем
+  var поОбъёму=document.getElementById('по_объёму');
+  if(поОбъёму && поОбъёму.checked) return;
   var д=parseFloat(document.getElementById('g_дл').value)||0;
   var ш=parseFloat(document.getElementById('g_ш').value)||0;
   var в=parseFloat(document.getElementById('g_в').value)||0;
@@ -213,6 +218,16 @@ function пересчётОбъёма(){
     var объём=(д*ш*в*м)/1000000;   // см³ → м³
     document.getElementById('поле_объём').value=объём.toFixed(4);
   }
+}
+function переключитьОбъём(){
+  var поОбъёму=document.getElementById('по_объёму').checked;
+  var объём=document.getElementById('поле_объём');
+  var габ=['g_дл','g_ш','g_в'].map(function(id){return document.getElementById(id);});
+  // галка ВКЛ → объём активен, габариты серые; галка ВЫКЛ → наоборот
+  объём.disabled=!поОбъёму;
+  объём.style.background=поОбъёму?'':'#f0f0f0';
+  габ.forEach(function(el){ if(el){ el.disabled=поОбъёму; el.style.background=поОбъёму?'#f0f0f0':''; } });
+  if(!поОбъёму) пересчётОбъёма();
 }
 var ВИДЫ = window.__ВИДЫ__ || [];
 function искатьВид(){
@@ -260,6 +275,7 @@ document.addEventListener('click',function(e){
   function upd(){ if(box) box.style.display = pn.checked ? '' : 'none'; }
   if(pn && box){ pn.addEventListener('change', upd); upd(); }
 })();
+переключитьОбъём();   // применить блокировку при загрузке (галка По объёму по умолчанию вкл)
 </script>
 </div></body></html>"""
 
