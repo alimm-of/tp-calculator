@@ -86,6 +86,11 @@ def импорт_json(db_path: str, json_path: str) -> dict:
             conn.execute(sql, vals)
         stats[table] = len(rows)
     conn.commit()
+    # мета-информация: дата среза выгрузки (чтобы видеть свежесть цен на странице)
+    conn.execute("CREATE TABLE IF NOT EXISTS meta (ключ TEXT PRIMARY KEY, значение TEXT)")
+    conn.execute("INSERT OR REPLACE INTO meta (ключ, значение) VALUES ('дата_среза', ?)",
+                 (pack.get("ДатаСреза") or "",))
+    conn.commit()
     return {"db": db_path, "дата_среза": pack.get("ДатаСреза"), "таблицы": stats}
 
 

@@ -14,7 +14,19 @@ from tp_calc.models import PriceRepository
 from tp_calc import engine
 
 DB = os.environ.get("PRICES_DB", "prices.db")
-ВЕРСИЯ = "v11"   # номер релиза — виден на странице
+ВЕРСИЯ = "v12"   # номер релиза — виден на странице
+
+def _дата_данных():
+    """Дата среза выгрузки цен — чтобы на странице было видно свежесть данных."""
+    if os.path.exists(DB):
+        try:
+            c = sqlite3.connect(DB)
+            row = c.execute("SELECT значение FROM meta WHERE ключ='дата_среза'").fetchone()
+            c.close()
+            return row[0] if row else ""
+        except Exception:
+            return ""
+    return ""
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # --- Значения по умолчанию для выпадающих списков (если в БД пусто) ---
@@ -147,7 +159,7 @@ PAGE = r"""
  .результаты .код{color:#888;font-size:12px}
  .err{color:#b00}
 </style></head><body><div class=wrap>
-<h1>Калькуляция · на основе цен «Транспортных перевозок» <span style="font-size:13px;color:#888;font-weight:normal">{{версия}}</span></h1>
+<h1>Калькуляция · на основе цен «Транспортных перевозок» <span style="font-size:13px;color:#888;font-weight:normal">{{версия}} · цены от {{дата_данных or '—'}}</span></h1>
 {% if not db_ok %}<div class="card err">База цен <b>{{db}}</b> не найдена.
 Создайте: <code>python cli.py import &lt;prices.json&gt; {{db}}</code></div>{% endif %}
 <form method=post class=card>
@@ -338,6 +350,7 @@ def index():
          for v in виды_товара],
         ensure_ascii=False)
     return render_template_string(PAGE, res=res, f=f, db=DB, db_ok=db_ok, версия=ВЕРСИЯ,
+                                  дата_данных=_дата_данных(),
                                   склады=склады, упаковки=упаковки, виды_товара=виды_товара,
                                   виды_json=виды_json, типы=типы)
 
