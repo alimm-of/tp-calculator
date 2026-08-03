@@ -14,7 +14,7 @@ from tp_calc.models import PriceRepository
 from tp_calc import engine
 
 DB = os.environ.get("PRICES_DB", "prices.db")
-ВЕРСИЯ = "v9"   # номер релиза — виден на странице
+ВЕРСИЯ = "v11"   # номер релиза — виден на странице
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # --- Значения по умолчанию для выпадающих списков (если в БД пусто) ---
@@ -165,12 +165,12 @@ PAGE = r"""
   </div>
   <div><label>Тип упаковки</label>
     <select name=упаковка>{% for код,имя in упаковки %}<option value="{{код}}" {{'selected' if f.упаковка==код else ''}}>{{имя}}</option>{% endfor %}</select></div>
-  <div><label>Вес, кг</label><input name=вес type=number step=any value="{{f.вес or 1000}}"></div>
-  <div><label>Объём, м³</label><input id=поле_объём name=объём type=number step=any value="{{f.объём or 2}}"></div>
+  <div><label>Вес, кг</label><input name=вес type=number step=any value="{{f.вес or ''}}"></div>
+  <div><label>Объём, м³</label><input id=поле_объём name=объём type=number step=any value="{{f.объём or ''}}"></div>
   <div><label>Кол-во мест</label><input id=поле_мест name=мест type=number value="{{f.мест or 1}}"></div>
   <div id=box_вупак style="display:none"><label>В упаковке (шт)</label><input name=в_упаковке type=number value="{{f.в_упаковке or 0}}"></div>
  </div>
- <div class=chk style="margin-top:8px"><input type=checkbox id=по_объёму name=по_объёму value=1 {{'checked' if f.по_объёму is not defined or f.по_объёму else ''}}>
+ <div class=chk style="margin-top:8px"><input type=checkbox id=по_объёму name=по_объёму value=1 {{'checked' if (res is none and f.по_объёму is not defined) or f.по_объёму else ''}}>
    <label for=по_объёму style="margin:0">По объёму (вводить объём вручную; иначе — из габаритов)</label></div>
  <div class=grid style="margin-top:8px">
   <div><label>Длина, см</label><input id=g_дл name=длина type=number step=any value="{{f.длина or ''}}"></div>
@@ -303,15 +303,34 @@ def index():
         флаги = ТИПЫ_ПЕРЕВОЗКИ.get(тип_пер, ТИПЫ_ПЕРЕВОЗКИ["Авто"])
         вид_операции = "ПриемПочтыСтационарный" if флаги["авиа"] else "ОднородныйТовар"
         код_товара = (f.get("вид_товара") or "").strip()
+        # Объём: если галка «По объёму» снята — считаем из габаритов (Д×Ш×В×места/1e6),
+        # иначе берём введённый вручную объём.
+        по_объёму = bool(f.get("по_объёму"))
+        объём_вручную = float(f.get("объём") or 0)
+        мест = int(f.get("мест") or 1) or 1
+        if not по_объёму:
+            try:
+                д = float(f.get("длина") or 0)
+                ш = float(f.get("ширина") or 0)
+                в = float(f.get("высота") or 0)
+            except ValueError:
+                д = ш = в = 0
+            объём_из_габаритов = (д * ш * в * мест) / 1_000_000 if (д > 0 and ш > 0 and в > 0) else 0
+            общий_объём = объём_из_габаритов
+        else:
+            общий_объём = объём_вручную
         inp = engine.CalcInput(
-            общий_вес=float(f.get("вес") or 0), общий_объем=float(f.get("объём") or 0),
+            общий_вес=float(f.get("вес") or 0), общий_объем=общий_объём,
             вид_товара=код_товара, группа_вида_товара=ГРУППА_ПО_КОДУ.get(код_товара) or None,
             тип_упаковки=f.get("упаковка") or None, склад=f.get("склад") or None,
             вид_операции=вид_операции, экспресс_доставка=флаги["экспресс"], дата=date.today(),
             вид_тарифа_на_перевозку=флаги.get("вид_тарифа", "000000001"),
-            количество_мест=int(f.get("мест") or 0), количество_в_упаковке=int(f.get("в_упаковке") or 0),
+            количество_мест=мест, количество_в_упаковке=int(f.get("в_упаковке") or 0),
             брэнд=bool(f.get("брэнд")), z_товар=bool(f.get("z_товар")),
         )
+        # сохраняем состояние галки и пересчитанный объём для повторного показа формы
+        f["по_объёму"] = "1" if по_объёму else ""
+        f["объём"] = ("%g" % общий_объём) if общий_объём else f.get("объём")
         res = engine.рассчитать(inp, repo, расчет_по_новому=bool(f.get("по_новому")))
     import json as _json
     виды_json = _json.dumps(
