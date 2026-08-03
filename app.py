@@ -14,6 +14,7 @@ from tp_calc.models import PriceRepository
 from tp_calc import engine
 
 DB = os.environ.get("PRICES_DB", "prices.db")
+ВЕРСИЯ = "v9"   # номер релиза — виден на странице
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # --- Значения по умолчанию для выпадающих списков (если в БД пусто) ---
@@ -23,9 +24,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 #   экспресс  — берётся колонка «Экспресс цена» (РасчетСреднейЦеныПоСтарому)
 #   авиа      — берётся колонка «Цена авиа» (вид операции ПриемПочтыСтационарный)
 ТИПЫ_ПЕРЕВОЗКИ = {
-    "Авто":         {"экспресс": False, "авиа": False},
-    "Авто Экспресс": {"экспресс": True,  "авиа": False},
-    "Авиа":         {"экспресс": False, "авиа": True},
+    "Авто":         {"экспресс": False, "авиа": False, "вид_тарифа": "000000001"},
+    "Авто Экспресс": {"экспресс": True,  "авиа": False, "вид_тарифа": "000000002"},
+    "Авиа":         {"экспресс": False, "авиа": True,  "вид_тарифа": "000000001"},
 }
 
 # Полный справочник видов товара (код → имя, группа), выгружен из 1С.
@@ -146,7 +147,7 @@ PAGE = r"""
  .результаты .код{color:#888;font-size:12px}
  .err{color:#b00}
 </style></head><body><div class=wrap>
-<h1>Калькуляция · на основе цен «Транспортных перевозок»</h1>
+<h1>Калькуляция · на основе цен «Транспортных перевозок» <span style="font-size:13px;color:#888;font-weight:normal">{{версия}}</span></h1>
 {% if not db_ok %}<div class="card err">База цен <b>{{db}}</b> не найдена.
 Создайте: <code>python cli.py import &lt;prices.json&gt; {{db}}</code></div>{% endif %}
 <form method=post class=card>
@@ -166,15 +167,15 @@ PAGE = r"""
     <select name=упаковка>{% for код,имя in упаковки %}<option value="{{код}}" {{'selected' if f.упаковка==код else ''}}>{{имя}}</option>{% endfor %}</select></div>
   <div><label>Вес, кг</label><input name=вес type=number step=any value="{{f.вес or 1000}}"></div>
   <div><label>Объём, м³</label><input id=поле_объём name=объём type=number step=any value="{{f.объём or 2}}"></div>
-  <div><label>Кол-во мест</label><input id=поле_мест name=мест type=number value="{{f.мест or 1}}" oninput="пересчётОбъёма()"></div>
+  <div><label>Кол-во мест</label><input id=поле_мест name=мест type=number value="{{f.мест or 1}}"></div>
   <div id=box_вупак style="display:none"><label>В упаковке (шт)</label><input name=в_упаковке type=number value="{{f.в_упаковке or 0}}"></div>
  </div>
- <div class=chk style="margin-top:8px"><input type=checkbox id=по_объёму name=по_объёму value=1 {{'checked' if f.по_объёму is not defined or f.по_объёму else ''}} onchange="переключитьОбъём()">
+ <div class=chk style="margin-top:8px"><input type=checkbox id=по_объёму name=по_объёму value=1 {{'checked' if f.по_объёму is not defined or f.по_объёму else ''}}>
    <label for=по_объёму style="margin:0">По объёму (вводить объём вручную; иначе — из габаритов)</label></div>
  <div class=grid style="margin-top:8px">
-  <div><label>Длина, см</label><input id=g_дл name=длина type=number step=any value="{{f.длина or ''}}" oninput="пересчётОбъёма()"></div>
-  <div><label>Ширина, см</label><input id=g_ш name=ширина type=number step=any value="{{f.ширина or ''}}" oninput="пересчётОбъёма()"></div>
-  <div><label>Высота, см</label><input id=g_в name=высота type=number step=any value="{{f.высота or ''}}" oninput="пересчётОбъёма()"></div>
+  <div><label>Длина, см</label><input id=g_дл name=длина type=number step=any value="{{f.длина or ''}}"></div>
+  <div><label>Ширина, см</label><input id=g_ш name=ширина type=number step=any value="{{f.ширина or ''}}"></div>
+  <div><label>Высота, см</label><input id=g_в name=высота type=number step=any value="{{f.высота or ''}}"></div>
  </div>
  <div class=src style="margin:4px 0 0">При снятой галке «По объёму» объём считается из Д×Ш×В×места ÷ 1 000 000.</div>
  <div class=chk><input type=checkbox id=pn name=по_новому value=1 {{'checked' if f.по_новому else ''}}>
@@ -275,7 +276,16 @@ document.addEventListener('click',function(e){
   function upd(){ if(box) box.style.display = pn.checked ? '' : 'none'; }
   if(pn && box){ pn.addEventListener('change', upd); upd(); }
 })();
-переключитьОбъём();   // применить блокировку при загрузке (галка По объёму по умолчанию вкл)
+// Надёжная привязка обработчиков (inline с кириллицей ненадёжен)
+document.addEventListener('DOMContentLoaded', function(){
+  var чек=document.getElementById('по_объёму');
+  if(чек) чек.addEventListener('change', переключитьОбъём);
+  ['g_дл','g_ш','g_в','поле_мест'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.addEventListener('input', пересчётОбъёма);
+  });
+  переключитьОбъём();  // начальное состояние
+});
 </script>
 </div></body></html>"""
 
@@ -298,7 +308,7 @@ def index():
             вид_товара=код_товара, группа_вида_товара=ГРУППА_ПО_КОДУ.get(код_товара) or None,
             тип_упаковки=f.get("упаковка") or None, склад=f.get("склад") or None,
             вид_операции=вид_операции, экспресс_доставка=флаги["экспресс"], дата=date.today(),
-            вид_тарифа_на_перевозку=тип_пер,
+            вид_тарифа_на_перевозку=флаги.get("вид_тарифа", "000000001"),
             количество_мест=int(f.get("мест") or 0), количество_в_упаковке=int(f.get("в_упаковке") or 0),
             брэнд=bool(f.get("брэнд")), z_товар=bool(f.get("z_товар")),
         )
@@ -308,7 +318,7 @@ def index():
         [{"код": v["код"], "имя": v["имя"], "имя_рус": v.get("имя_рус", ""), "группа": v.get("группа", "")}
          for v in виды_товара],
         ensure_ascii=False)
-    return render_template_string(PAGE, res=res, f=f, db=DB, db_ok=db_ok,
+    return render_template_string(PAGE, res=res, f=f, db=DB, db_ok=db_ok, версия=ВЕРСИЯ,
                                   склады=склады, упаковки=упаковки, виды_товара=виды_товара,
                                   виды_json=виды_json, типы=типы)
 
