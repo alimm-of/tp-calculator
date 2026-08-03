@@ -14,7 +14,7 @@ from tp_calc.models import PriceRepository
 from tp_calc import engine
 
 DB = os.environ.get("PRICES_DB", "prices.db")
-ВЕРСИЯ = "v12"   # номер релиза — виден на странице
+ВЕРСИЯ = "v13"   # номер релиза — виден на странице
 
 def _дата_данных():
     """Дата среза выгрузки цен — чтобы на странице было видно свежесть данных."""
@@ -248,6 +248,9 @@ function искатьВид(){
   var box=document.getElementById('вид_результаты');
   var q=поле.value.trim().toLowerCase();
   document.getElementById('вид_товара_имя').value=поле.value;
+  // Сбрасываем ранее выбранный код: он валиден только после клика по результату
+  // или точного совпадения текста. Иначе остаётся код от прошлого товара.
+  document.getElementById('вид_товара_код').value='';
   if(q.length<1){ box.style.display='none'; return; }
   var res=[];
   for(var i=0;i<ВИДЫ.length && res.length<50;i++){
@@ -256,7 +259,10 @@ function искатьВид(){
     var рус=(v.имя_рус||'').toLowerCase();
     var код=(v.код||'').toLowerCase();
     // поиск по латинскому, русскому названию или коду
-    if(имя.indexOf(q)>=0 || рус.indexOf(q)>=0 || код.indexOf(q)>=0) res.push(v);
+    if(имя.indexOf(q)>=0 || рус.indexOf(q)>=0 || код.indexOf(q)>=0){
+      res.push(v);
+      if(имя===q || рус===q) document.getElementById('вид_товара_код').value=v.код;  // точное совпадение
+    }
   }
   if(!res.length){ box.innerHTML='<div class=код>ничего не найдено</div>'; box.style.display='block'; return; }
   var h='';
@@ -315,6 +321,15 @@ def index():
         флаги = ТИПЫ_ПЕРЕВОЗКИ.get(тип_пер, ТИПЫ_ПЕРЕВОЗКИ["Авто"])
         вид_операции = "ПриемПочтыСтационарный" if флаги["авиа"] else "ОднородныйТовар"
         код_товара = (f.get("вид_товара") or "").strip()
+        # Подстраховка: если код не пришёл (пользователь не выбрал из списка),
+        # но введён текст — ищем точное совпадение по имени/рус-имени.
+        if not код_товара:
+            текст = (f.get("вид_товара_имя") or "").strip().lower()
+            if текст:
+                for v in ВИДЫ_ТОВАРА:
+                    if v["имя"].lower() == текст or (v.get("имя_рус") or "").lower() == текст:
+                        код_товара = v["код"]
+                        break
         # Объём: если галка «По объёму» снята — считаем из габаритов (Д×Ш×В×места/1e6),
         # иначе берём введённый вручную объём.
         по_объёму = bool(f.get("по_объёму"))
